@@ -5,7 +5,17 @@ from datetime import datetime
 import time
 import os
 import json
+from pymongo import MongoClient
 from config import FILLER_WORDS, IDEAL_WPM, SLOW_THRESHOLD, FAST_THRESHOLD
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # .env 파일 로드
+
+MONGO_URI = os.getenv("MONGO_URI")
+DB_NAME = os.getenv("DB_NAME")
+COLLECTION_NAME = os.getenv("COLLECTION_NAME")
+
 
 app = FastAPI()
 
@@ -18,9 +28,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 결과 저장 디렉토리
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results')
-os.makedirs(RESULTS_DIR, exist_ok=True)
+# MongoDB 클라이언트 연결
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client[DB_NAME]
+collection = db[COLLECTION_NAME]
 
 # 요청 모델
 class TextAnalysisRequest(BaseModel):
@@ -63,6 +74,7 @@ class SpeechAnalyzer:
             wpm_feedback = "적절한 속도로 말하고 계십니다."
 
         return {
+            "session_id": self.session_id,
             "full_text": self.full_text.strip(),
             "word_count": self.word_count,
             "wpm": round(wpm, 2),
@@ -73,18 +85,23 @@ class SpeechAnalyzer:
             "last_updated": datetime.now().isoformat()
         }
 
+    @property
+    def session_id(self):
+        return getattr(self, '_session_id', 'default')
+
+    @session_id.setter
+    def session_id(self, value):
+        self._session_id = value
+
 # 인메모리 세션 저장소
 sessions = {}
 
-# 분석 결과 저장
-def save_result(session_id: str, result: dict) -> None:
+# MongoDB에 분석 결과 저장
+def save_result_to_db(result: dict) -> None:
     try:
-        filename = f"speech_analysis_{session_id}_{int(time.time())}.json"
-        filepath = os.path.join(RESULTS_DIR, filename)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
+        collection.insert_one(result)
     except Exception as e:
-        print(f"결과 저장 중 오류: {e}")
+        print(f"MongoDB 저장 실패: {e}")
 
 # API: 텍스트 분석
 @app.post("/api/analyze")
@@ -94,14 +111,16 @@ async def analyze_text(request: TextAnalysisRequest):
 
     # 세션 가져오기
     if request.session_id not in sessions:
-        sessions[request.session_id] = SpeechAnalyzer()
+        analyzer = SpeechAnalyzer()
+        analyzer.session_id = request.session_id
+        sessions[request.session_id] = analyzer
 
     analyzer = sessions[request.session_id]
     analyzer.add_text(request.text)
     result = analyzer.get_analysis()
 
-    # 파일 저장
-    save_result(request.session_id, result)
+    # MongoDB에 저장
+    save_result_to_db(result)
 
     return {
         "success": True,
@@ -123,23 +142,17 @@ async def get_filler_words():
         "words": FILLER_WORDS
     }
 
-# 📁 추가: 세션별 전체 분석 기록 불러오기
+# API: 세션별 전체 분석 기록 불러오기 (MongoDB 기반)
 @app.get("/api/session-history/{session_id}")
 async def get_session_history(session_id: str):
-    result_files = [f for f in os.listdir(RESULTS_DIR) if f.startswith(f"speech_analysis_{session_id}_")]
-    if not result_files:
-        raise HTTPException(status_code=404, detail="해당 세션의 분석 기록이 없습니다.")
-
-    history = []
-    for fname in sorted(result_files):
-        try:
-            with open(os.path.join(RESULTS_DIR, fname), 'r', encoding='utf-8') as f:
-                history.append(json.load(f))
-        except:
-            continue
-
-    return {
-        "success": True,
-        "session_id": session_id,
-        "history": history
-    }
+    try:
+        results = list(collection.find({"session_id": session_id}, {"_id": 0}))
+        if not results:
+            raise HTTPException(status_code=404, detail="해당 세션의 분석 기록이 없습니다.")
+        return {
+            "success": True,
+            "session_id": session_id,
+            "history": results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB 조회 오류: {e}")
