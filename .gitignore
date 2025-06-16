@@ -20,9 +20,9 @@ scala/**/target
 maven/**/target
 
 ## nodejs
-node/**/node_modules
-node/**/package-lock.json
-node/**/.serverless
+**/node_modules
+**/package-lock.json
+**/.serverless
 
 ## python
 .idea
@@ -58,3 +58,7 @@ bookmateproject/node/**/package-lock.json
 
 ## nestjs
 nestjs
+
+.venv
+
+results
