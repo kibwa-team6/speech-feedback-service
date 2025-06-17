@@ -1,7 +1,8 @@
+//import Google Gemini AI package
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-
+//put api key in .env
 const gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
+//
 async function analyzeAudioFile(audioContent) {
     try {
         // For the free version, we'll use a simple analysis based on file size and duration
@@ -25,7 +26,7 @@ async function analyzeAudioFile(audioContent) {
         throw error;
     }
 }
-
+//this exports the function so it can be imported and used in other files
 module.exports = {
     analyzeAudioFile
 };

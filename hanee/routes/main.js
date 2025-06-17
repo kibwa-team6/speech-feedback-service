@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router(); // 라우터 인스턴스
 const multer = require('multer');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -23,7 +24,10 @@ var storage = multer.diskStorage({
         cb(null, `${Date.now()}_${file.originalname}`);
     },
 });
-var upload = multer.single'({ storage: storage });
+var upload = multer({ storage: storage }).fields([
+    { name: 'audiofile1', maxCount: 1 },
+    { name: 'audiofile2', maxCount: 1 }
+]);
 
 // LLM을 사용하여 오디오 분석을 시뮬레이션하는 함수
 // 실제 오디오 분석은 복잡하며, 여기서는 LLM을 사용하여 더미 데이터를 생성합니다.
@@ -224,7 +228,7 @@ router.get('/list', (req, res) => {
 });
 
 // 파일 업로드 POST 요청 ('/uploadFile'): 로컬에 저장 후 S3에 업로드, 로컬 파일 삭제
-router.post('/uploadFile', upload.single('attachment'), async (req, res) => {
+router.post('/uploadFile', upload.single('audiofile'), async (req, res) => {
     if (!req.file) {
         return res.status(400).render('confirmation', { file: { error: '업로드할 파일이 없습니다.' }, files: null });
     }
@@ -349,5 +353,38 @@ router.post('/compareAudio', async (req, res) => {
     }
 });
 
+// POST /transcribe
+router.post('/transcribe', async (req, res) => {
+    const audioFilePath = path.join(__dirname, '../uploadedFiles', req.body.filename);
+
+    if (!fs.existsSync(audioFilePath)) {
+        return res.status(404).json({ error: 'Audio file not found' });
+    }
+
+    const python = spawn('python3', ['transcribe.py', audioFilePath]);
+
+    let result = '';
+    let error = '';
+
+    python.stdout.on('data', (data) => {
+        result += data.toString();
+    });
+
+    python.stderr.on('data', (data) => {
+        error += data.toString();
+    });
+
+    python.on('close', (code) => {
+        if (code !== 0) {
+            return res.status(500).json({ error: 'Python error', details: error });
+        }
+        try {
+            const parsed = JSON.parse(result);
+            res.json(parsed);
+        } catch (err) {
+            res.status(500).json({ error: 'Failed to parse Python output', raw: result });
+        }
+    });
+});
 
 module.exports = router; // router 인스턴스를 내보내기

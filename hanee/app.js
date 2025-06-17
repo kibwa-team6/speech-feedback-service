@@ -3,10 +3,13 @@ const morgan = require("morgan");
 const path = require("path");
 const fs = require('fs')
 const app = express();
+const mainRoutes = require('./routes/main');
 const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
 const mongoose = require('mongoose');
 
+app.use(express.json());
+app.use('/', mainRoutes);
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://13.250.114.125:27017/audio-transcriptions', {
     useNewUrlParser: true,
